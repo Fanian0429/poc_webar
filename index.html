@@ -5,6 +5,7 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>POC_WebAR_GeoSLAM</title>
+  <script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js"></script>
   <style>
     html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
     #ar-overlay-root {
@@ -30,8 +31,8 @@
       background: #2979ff; color: #fff; font-weight: bold;
     }
     button:disabled { background: #555; }
-    #calibrate-row { display: flex; gap: 8px; }
-    #calibrate-row button { padding: 8px 16px; font-size: 14px; background: #444; }
+    #adjust-row, #adjust-row2 { display: flex; gap: 8px; }
+    #adjust-row button, #adjust-row2 button { padding: 8px 14px; font-size: 14px; background: #444; }
     #status-line { white-space: pre-line; }
   </style>
 </head>
@@ -43,10 +44,15 @@
     </div>
 
     <div id="controls">
-      <div id="calibrate-row" style="display:none;">
-        <button id="heading-minus">羅盤 -10°</button>
-        <button id="heading-plus">羅盤 +10°</button>
-        <button id="replace-btn">重新錨定</button>
+      <div id="adjust-row" style="display:none;">
+        <button id="y-up">高度 ▲</button>
+        <button id="y-down">高度 ▼</button>
+        <button id="rot-minus">-5°</button>
+        <button id="rot-plus">+5°</button>
+      </div>
+      <div id="adjust-row2" style="display:none;">
+        <button id="recalibrate-btn">依GPS校準</button>
+        <button id="place-here-btn">放在目前位置</button>
       </div>
       <button id="start-btn">開始 AR 體驗</button>
     </div>
@@ -72,8 +78,9 @@
     const MODEL_URL = './1BR.gltf';
     const MODEL_SCALE = 1; // 若模型單位是公尺，先從 1 開始測試，依實際狀況調整
 
-    // 羅盤讀值在不同裝置/瀏覽器上常有系統性偏移(常見 ±15~30°)，
-    // 這裡提供一個可即時調整的手動校正偏移量，不需要改程式碼即可微調
+    // 羅盤讀值在不同裝置/瀏覽器上常有系統性偏移(常見 ±15~30°)。
+    // 這個版本改用「依GPS校準」按鈕搭配旋轉/高度微調按鈕現場修正，
+    // 如仍需要調整羅盤基礎偏移，可直接修改這個常數後重新部署。
     let headingOffset = 0;
 
     // ---------------------------------------------------------------
@@ -91,7 +98,8 @@
 
     const statusEl = document.getElementById('status-line');
     const startBtn = document.getElementById('start-btn');
-    const calibrateRow = document.getElementById('calibrate-row');
+    const adjustRow = document.getElementById('adjust-row');
+    const adjustRow2 = document.getElementById('adjust-row2');
 
     function updateStatus(extra) {
       const dist = (userLat !== null) ? haversineDistance(userLat, userLon, TARGET_LAT, TARGET_LON).toFixed(1) + ' m' : '-';
@@ -160,25 +168,56 @@
       window.addEventListener('deviceorientationabsolute', (event) => {
         if (event.alpha === null) return;
         // 注意：alpha 的方向定義在不同裝置上可能相反，
-        // 如發現模型方向錯誤，請用畫面下方的「羅盤 +10° / -10°」按鈕現場校正
+        // 如發現模型方向錯誤，可用「-5°/+5°」旋轉按鈕現場校正
         currentHeading = (event.alpha + headingOffset + 360) % 360;
         updateStatus();
       }, true);
     }
 
-    document.getElementById('heading-minus').addEventListener('click', () => {
-      headingOffset = (headingOffset - 10 + 360) % 360;
-      updateStatus();
+    document.getElementById('y-up').addEventListener('click', () => {
+      if (!model) return;
+      model.position.y += 0.1;
+      updateStatus('已將模型高度上移 0.1m(目前 Y: ' + model.position.y.toFixed(2) + ')');
     });
-    document.getElementById('heading-plus').addEventListener('click', () => {
-      headingOffset = (headingOffset + 10) % 360;
-      updateStatus();
+    document.getElementById('y-down').addEventListener('click', () => {
+      if (!model) return;
+      model.position.y -= 0.1;
+      updateStatus('已將模型高度下移 0.1m(目前 Y: ' + model.position.y.toFixed(2) + ')');
     });
-    document.getElementById('replace-btn').addEventListener('click', () => {
-      // 使用最近一次偵測到的平面，依目前(校正後)的羅盤數值重新計算模型位置
+    document.getElementById('rot-plus').addEventListener('click', () => {
+      if (!model) return;
+      model.rotation.y += toRad(5);
+      updateStatus('已順時鐘旋轉 5°');
+    });
+    document.getElementById('rot-minus').addEventListener('click', () => {
+      if (!model) return;
+      model.rotation.y -= toRad(5);
+      updateStatus('已逆時鐘旋轉 5°');
+    });
+    document.getElementById('recalibrate-btn').addEventListener('click', () => {
+      // 使用最近一次偵測到的平面，依目前 GPS + 羅盤重新計算模型位置
       if (lastHitPose && xrSession) {
         placeModel(lastHitPose.pose, lastHitPose.frame, lastHitPose.referenceSpace);
+      } else {
+        updateStatus('尚未偵測到平面，無法依 GPS 校準。');
       }
+    });
+    document.getElementById('place-here-btn').addEventListener('click', () => {
+      // 忽略 GPS，直接把模型放在目前偵測到的平面位置(面向使用者)
+      if (!lastHitPose || !xrSession) { updateStatus('尚未偵測到平面，無法放置。'); return; }
+      if (!model) { updateStatus('模型尚未載入完成。'); return; }
+
+      const { pose, frame, referenceSpace } = lastHitPose;
+      const camPose = frame.getViewerPose(referenceSpace);
+      if (!camPose) return;
+      const camPos = camPose.transform.position;
+      const hitPos = pose.transform.position;
+
+      model.position.set(hitPos.x, hitPos.y, hitPos.z);
+      model.rotation.y = Math.atan2(camPos.x - hitPos.x, camPos.z - hitPos.z);
+      model.visible = true;
+      modelPlaced = true;
+      updateStatus('已忽略 GPS，將模型放置於目前偵測到的平面位置。');
     });
 
     // ---------------------------------------------------------------
@@ -193,10 +232,90 @@
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.0));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 0.6);
+    scene.add(hemiLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
     dirLight.position.set(-1, 4, 2);
     scene.add(dirLight);
+    scene.add(dirLight.target); // DirectionalLight 的 target 必須加入場景，調整 target.position 才會生效
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.25);
+    fillLight.position.set(1, 2, -2); // 從主光源反方向補光，避免背光面全黑
+    scene.add(fillLight);
+
+    // 若目標裝置上模型仍然顯示過暗/全黑(常見於材質需要環境反射光才會正確顯示的狀況)，
+    // 可以把這個開關打開，模型會改用不受光照影響的原始顏色顯示，確保絕對不會全黑
+    const USE_FLAT_SHADING_FALLBACK = false;
+
+    function applyFlatShadingFallback(root) {
+      root.traverse((node) => {
+        if (node.isMesh && node.material) {
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          materials.forEach((mat) => {
+            if (mat.map || mat.color) {
+              const flatMat = new THREE.MeshBasicMaterial({
+                map: mat.map || null,
+                color: mat.color ? mat.color.clone() : 0xffffff
+              });
+              node.material = Array.isArray(node.material) ? node.material.map(() => flatMat) : flatMat;
+            }
+          });
+        }
+      });
+    }
+
+    // ---------------------------------------------------------------
+    // 太陽光模擬：依目前 GPS + 系統時間計算太陽方位角與仰角，調整方向光
+    // 注意：suncalc 1.9.0 回傳弧度(radian)，azimuth 以「正南」為 0，順時鐘朝西增加
+    // (與一般羅盤「正北為 0」的方位角定義不同，這裡已經做轉換)
+    // ---------------------------------------------------------------
+    let lastSunUpdateTime = 0;
+
+    function updateSunLighting(camPose) {
+      if (typeof SunCalc === 'undefined') return;
+      if (userLat === null || userLon === null || currentHeading === null) return;
+
+      const now = new Date();
+      const sunPos = SunCalc.getPosition(now, userLat, userLon);
+      const altitude = sunPos.altitude; // 弧度，0=地平線，PI/2=正上方
+      const sunBearing = (toDeg(sunPos.azimuth) + 180 + 360) % 360; // 轉換成「正北為 0」的方位角
+
+      const camOri = camPose.transform.orientation;
+      const camQuat = new THREE.Quaternion(camOri.x, camOri.y, camOri.z, camOri.w);
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camQuat);
+      forward.y = 0;
+      forward.normalize();
+
+      const relativeAngle = toRad(sunBearing - currentHeading);
+      const horizDir = forward.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), -relativeAngle);
+
+      const sunDir = new THREE.Vector3(
+        horizDir.x * Math.cos(altitude),
+        Math.sin(altitude),
+        horizDir.z * Math.cos(altitude)
+      ).normalize();
+
+      dirLight.position.copy(sunDir.clone().multiplyScalar(50));
+      if (model) {
+        dirLight.target.position.copy(model.position);
+      }
+
+      if (altitude <= 0) {
+        // 太陽在地平線以下：降低方向光，改以環境光維持基本可視度(避免全黑)
+        dirLight.intensity = 0.2;
+        dirLight.color.set(0x4466aa);
+        hemiLight.intensity = 0.9;
+      } else if (altitude < toRad(10)) {
+        // 日出/日落前後：暖色調、光線角度低
+        dirLight.intensity = 0.9;
+        dirLight.color.set(0xffaa66);
+        hemiLight.intensity = 0.5;
+      } else {
+        // 一般日間
+        dirLight.intensity = 1.2;
+        dirLight.color.set(0xffffff);
+        hemiLight.intensity = 0.6;
+      }
+    }
 
     const loader = new GLTFLoader();
     loader.load(
@@ -205,6 +324,9 @@
         model = gltf.scene;
         model.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
         model.visible = false;
+        if (USE_FLAT_SHADING_FALLBACK) {
+          applyFlatShadingFallback(model);
+        }
         scene.add(model);
         updateStatus('模型已載入，等待 AR 平面偵測');
       },
@@ -267,7 +389,8 @@
         await renderer.xr.setSession(session);
 
         startBtn.style.display = 'none';
-        calibrateRow.style.display = 'flex';
+        adjustRow.style.display = 'flex';
+        adjustRow2.style.display = 'flex';
 
         renderer.setAnimationLoop(onXRFrame);
       } catch (e) {
@@ -287,7 +410,8 @@
       startBtn.style.display = 'block';
       startBtn.disabled = false;
       startBtn.textContent = '開始 AR 體驗';
-      calibrateRow.style.display = 'none';
+      adjustRow.style.display = 'none';
+      adjustRow2.style.display = 'none';
       renderer.setAnimationLoop(null);
     }
 
@@ -303,17 +427,25 @@
       }
 
       const referenceSpace = renderer.xr.getReferenceSpace();
+      const camPose = frame.getViewerPose(referenceSpace);
 
-      if (hitTestSource && !modelPlaced) {
+      if (hitTestSource) {
         const hitTestResults = frame.getHitTestResults(hitTestSource);
         if (hitTestResults.length > 0) {
           const hit = hitTestResults[0];
           const pose = hit.getPose(referenceSpace);
           lastHitPose = { pose, frame, referenceSpace };
-          placeModel(pose, frame, referenceSpace);
-        } else {
+          if (!modelPlaced) {
+            placeModel(pose, frame, referenceSpace);
+          }
+        } else if (!modelPlaced) {
           updateStatus('請將手機朝向地面/桌面掃描平面中...');
         }
+      }
+
+      if (camPose && timestamp - lastSunUpdateTime > 5000) {
+        lastSunUpdateTime = timestamp;
+        updateSunLighting(camPose);
       }
 
       renderer.render(scene, camera);
