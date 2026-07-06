@@ -7,19 +7,23 @@
   <title>POC_WebAR_GeoSLAM</title>
   <style>
     html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+    #ar-overlay-root {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 10; pointer-events: none;
+    }
     #overlay {
       position: fixed; top: 0; left: 0; width: 100%;
-      box-sizing: border-box; padding: 10px 14px;
+      box-sizing: border-box; padding: 54px 14px 10px 14px;
       font-family: -apple-system, "Noto Sans TC", sans-serif;
       color: #fff; background: rgba(0,0,0,0.55);
-      font-size: 13px; line-height: 1.6; z-index: 10;
+      font-size: 13px; line-height: 1.6;
       pointer-events: none;
     }
     #controls {
       position: fixed; bottom: 0; left: 0; width: 100%;
       box-sizing: border-box; padding: 16px;
       display: flex; flex-direction: column; align-items: center; gap: 10px;
-      z-index: 10;
+      pointer-events: auto;
     }
     button {
       font-size: 15px; padding: 12px 22px; border-radius: 8px; border: none;
@@ -33,17 +37,19 @@
 </head>
 <body>
 
-  <div id="overlay">
-    <div id="status-line">尚未開始</div>
-  </div>
-
-  <div id="controls">
-    <div id="calibrate-row" style="display:none;">
-      <button id="heading-minus">羅盤 -10°</button>
-      <button id="heading-plus">羅盤 +10°</button>
-      <button id="replace-btn">重新錨定</button>
+  <div id="ar-overlay-root">
+    <div id="overlay">
+      <div id="status-line">尚未開始</div>
     </div>
-    <button id="start-btn">開始 AR 體驗</button>
+
+    <div id="controls">
+      <div id="calibrate-row" style="display:none;">
+        <button id="heading-minus">羅盤 -10°</button>
+        <button id="heading-plus">羅盤 +10°</button>
+        <button id="replace-btn">重新錨定</button>
+      </div>
+      <button id="start-btn">開始 AR 體驗</button>
+    </div>
   </div>
 
   <script type="importmap">
@@ -51,7 +57,7 @@
     "imports": {
       "three": "https://unpkg.com/three@0.158.0/build/three.module.js"
     }
-  } 
+  }
   </script>
 
   <script type="module">
@@ -61,8 +67,8 @@
     // ---------------------------------------------------------------
     // 專案設定：目標建物 GPS 座標與模型資訊
     // ---------------------------------------------------------------
-    const TARGET_LAT = 24.184008;
-    const TARGET_LON = 120.614683;
+    const TARGET_LAT = 24.183192;
+    const TARGET_LON = 120.613790;
     const MODEL_URL = './1BR.gltf';
     const MODEL_SCALE = 1; // 若模型單位是公尺，先從 1 開始測試，依實際狀況調整
 
@@ -251,7 +257,7 @@
         const session = await navigator.xr.requestSession('immersive-ar', {
           requiredFeatures: ['hit-test', 'local'],
           optionalFeatures: ['dom-overlay'],
-          domOverlay: { root: document.getElementById('overlay') }
+          domOverlay: { root: document.getElementById('ar-overlay-root') }
         });
 
         xrSession = session;
