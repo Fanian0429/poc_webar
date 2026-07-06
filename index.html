@@ -46,8 +46,16 @@
     <button id="start-btn">開始 AR 體驗</button>
   </div>
 
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.158.0/build/three.module.js"
+    }
+  }
+  </script>
+
   <script type="module">
-    import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
+    import * as THREE from 'three';
     import { GLTFLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js';
 
     // ---------------------------------------------------------------
@@ -339,7 +347,7 @@
         camPos.z + targetDir.z * distance
       );
 
-      // 模型面向：讓模型正面朝向使用者站立的方向(可依模型原始朝向調整角度) 
+      // 模型面向：讓模型正面朝向使用者站立的方向(可依模型原始朝向調整角度)
       model.rotation.y = Math.atan2(targetDir.x, targetDir.z);
 
       model.visible = true;
