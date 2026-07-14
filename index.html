@@ -5,7 +5,6 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>POC_WebAR_GeoSLAM</title>
-  <script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js"></script>
   <style>
     html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
     #ar-overlay-root {
@@ -33,11 +32,11 @@
       transition: background 0.08s ease, transform 0.08s ease, filter 0.08s ease;
     }
     button:disabled { background: #555; }
-    #adjust-row, #adjust-row2 { display: flex; gap: 8px; }
-    #adjust-row button, #adjust-row2 button { padding: 8px 14px; font-size: 14px; background: #444; }
+    #adjust-row, #adjust-row2, #floor-row { display: flex; gap: 8px; }
+    #adjust-row button, #adjust-row2 button, #floor-row button { padding: 8px 14px; font-size: 14px; background: #444; }
 
     /* 按下時的視覺回饋：灰色按鈕轉藍色、主按鈕變暗，並縮小一點模擬按壓感 */
-    #adjust-row button.pressed, #adjust-row2 button.pressed {
+    #adjust-row button.pressed, #adjust-row2 button.pressed, #floor-row button.pressed {
       background: #2979ff;
       transform: scale(0.94);
     }
@@ -62,6 +61,10 @@
         <button id="y-down">Height ▼</button>
         <button id="rot-minus">-5°</button>
         <button id="rot-plus">+5°</button>
+      </div>
+      <div id="floor-row" style="display:none;">
+        <button id="floor-up">Upstairs ▲</button>
+        <button id="floor-down">Downstairs ▼</button>
       </div>
       <div id="adjust-row2" style="display:none;">
         <button id="recalibrate-btn">Calibrate by GPS</button>
@@ -88,7 +91,7 @@
     // ---------------------------------------------------------------
     const TARGET_LAT = 24.183192;
     const TARGET_LON = 120.613790;
-    const MODEL_URL = './1BR.gltf';
+    const MODEL_URL = './townhouse.glb';
     const MODEL_SCALE = 1; // 若模型單位是公尺，先從 1 開始測試，依實際狀況調整
 
     // 羅盤讀值在不同裝置/瀏覽器上常有系統性偏移(常見 ±15~30°)。
@@ -123,6 +126,7 @@
     const startBtn = document.getElementById('start-btn');
     const adjustRow = document.getElementById('adjust-row');
     const adjustRow2 = document.getElementById('adjust-row2');
+    const floorRow = document.getElementById('floor-row');
 
     function updateStatus(newMessage) {
       if (newMessage !== undefined) {
@@ -233,6 +237,16 @@
       model.rotation.y -= toRad(5);
       updateStatus('Rotated -5° (counter-clockwise)');
     });
+    document.getElementById('floor-up').addEventListener('click', () => {
+      if (!model) return;
+      model.position.y += 3;
+      updateStatus('Moved up one floor (+3m, current Y: ' + model.position.y.toFixed(2) + ')');
+    });
+    document.getElementById('floor-down').addEventListener('click', () => {
+      if (!model) return;
+      model.position.y -= 3;
+      updateStatus('Moved down one floor (-3m, current Y: ' + model.position.y.toFixed(2) + ')');
+    });
     document.getElementById('recalibrate-btn').addEventListener('click', () => {
       if (lastHitPosition && lastCameraPosition && lastCameraForward) {
         placeModelFromCache();
@@ -256,7 +270,7 @@
 
     // ---------------------------------------------------------------
     // Three.js 基本場景與燈光
-    // 需求：均勻自然光，避免單一方向光造成明暗反差過大
+    // 需求：不再追蹤太陽方向，改用固定的均勻光照，盡量降低模型的明暗反差
     // ---------------------------------------------------------------
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(window.devicePixelRatio);
@@ -267,27 +281,27 @@
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
 
-    // 環境光(Hemisphere)提高基礎亮度，維持大範圍均勻照明
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.0);
+    // 環境光(Hemisphere)拉高強度，作為主要照明來源，天生就是均勻的環境光，沒有方向性陰影
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 1.3);
     scene.add(hemiLight);
 
-    // 主要方向光(模擬太陽)：刻意調低強度，避免跟環境光反差過大
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.55);
-    dirLight.position.set(-1, 4, 2);
-    scene.add(dirLight);
-    scene.add(dirLight.target); // DirectionalLight 的 target 必須加入場景，調整 target.position 才會生效
+    // 四顆低強度方向光，從東南西北四個角度均勻打光，
+    // 每顆強度都刻意壓低且彼此相同，讓每個面都有基本亮度、不會有明顯的「亮面/暗面」對比
+    const lightDirs = [
+      [1, 2, 1],
+      [-1, 2, 1],
+      [1, 2, -1],
+      [-1, 2, -1]
+    ];
+    const fillLights = lightDirs.map((pos) => {
+      const l = new THREE.DirectionalLight(0xffffff, 0.35);
+      l.position.set(pos[0], pos[1], pos[2]);
+      scene.add(l);
+      return l;
+    });
 
-    // 兩顆補光，分別從主光源的相反側與側邊補光，讓陰影面不會死黑，達成更均勻的整體光照
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
-    fillLight.position.set(1, 2, -2);
-    scene.add(fillLight);
-
-    const fillLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
-    fillLight2.position.set(0, 3, 3);
-    scene.add(fillLight2);
-
-    // 若實測後模型仍然明暗差距過大或方向持續有問題，可以把這個開關打開，
-    // 模型會改用不受光照影響的原始顏色顯示，保證絕對均勻、不會再有明暗問題
+    // 若實測後模型仍然有不想要的明暗差異，可以把這個開關打開，
+    // 模型會改用不受光照影響的原始顏色顯示，保證絕對均勻
     const USE_FLAT_SHADING_FALLBACK = false;
 
     function applyFlatShadingFallback(root) {
@@ -301,54 +315,6 @@
           node.material = Array.isArray(node.material) ? flatMats : flatMats[0];
         }
       });
-    }
-
-    // ---------------------------------------------------------------
-    // 太陽光模擬：依目前 GPS + 系統時間計算太陽方位角與仰角，調整方向光
-    // suncalc 1.9.0 回傳弧度(radian)，azimuth 以「正南」為 0，順時鐘朝西增加，
-    // 這裡轉換成「正北為 0、順時鐘」的羅盤方位角格式，再套用跟 placeModel 相同的座標轉換
-    // ---------------------------------------------------------------
-    let lastSunUpdateTime = 0;
-
-    function updateSunLighting() {
-      if (typeof SunCalc === 'undefined') return;
-      if (userLat === null || userLon === null || currentHeading === null) return;
-      if (!lastCameraForward) return;
-
-      const now = new Date();
-      const sunPos = SunCalc.getPosition(now, userLat, userLon);
-      const altitude = sunPos.altitude; // 弧度，0=地平線，PI/2=正上方
-      const sunBearing = (toDeg(sunPos.azimuth) + 180 + 360) % 360; // 轉換成「正北為 0」的方位角
-
-      // 上一版方向反了：這裡把旋轉方向的正負號對調(改成不加負號)
-      const relativeAngle = toRad(sunBearing - currentHeading);
-      const horizDir = lastCameraForward.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), relativeAngle);
-
-      const sunDir = new THREE.Vector3(
-        horizDir.x * Math.cos(altitude),
-        Math.sin(altitude),
-        horizDir.z * Math.cos(altitude)
-      ).normalize();
-
-      dirLight.position.copy(sunDir.clone().multiplyScalar(50));
-      if (model) {
-        dirLight.target.position.copy(model.position);
-      }
-
-      // 只依時段做「暖色/冷色」的輕微調整，強度差距刻意壓小，避免明暗反差過大
-      if (altitude <= 0) {
-        dirLight.intensity = 0.15;
-        dirLight.color.set(0x6688bb);
-        hemiLight.intensity = 1.1;
-      } else if (altitude < toRad(10)) {
-        dirLight.intensity = 0.45;
-        dirLight.color.set(0xffbb88);
-        hemiLight.intensity = 0.9;
-      } else {
-        dirLight.intensity = 0.55;
-        dirLight.color.set(0xffffff);
-        hemiLight.intensity = 1.0;
-      }
     }
 
     const loader = new GLTFLoader();
@@ -367,7 +333,7 @@
       undefined,
       (err) => {
         console.error('GLTF load error', err);
-        updateStatus('Failed to load model. Please check the 1BR.gltf path.');
+        updateStatus('Failed to load model. Please check the townhouse.glb path.');
       }
     );
 
@@ -424,6 +390,7 @@
 
         startBtn.style.display = 'none';
         adjustRow.style.display = 'flex';
+        floorRow.style.display = 'flex';
         adjustRow2.style.display = 'flex';
 
         renderer.setAnimationLoop(onXRFrame);
@@ -446,6 +413,7 @@
       startBtn.disabled = false;
       startBtn.textContent = 'Start AR Experience';
       adjustRow.style.display = 'none';
+      floorRow.style.display = 'none';
       adjustRow2.style.display = 'none';
       renderer.setAnimationLoop(null);
     }
@@ -492,11 +460,6 @@
         } else if (!modelPlaced) {
           updateStatus('Point your phone at the floor/table to scan for a surface...');
         }
-      }
-
-      if (camPose && timestamp - lastSunUpdateTime > 5000) {
-        lastSunUpdateTime = timestamp;
-        updateSunLighting();
       }
 
       renderer.render(scene, camera);
