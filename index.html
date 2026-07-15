@@ -85,6 +85,7 @@
   <script type="module">
     import * as THREE from 'three';
     import { GLTFLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js';
+    import { OrbitControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js';
 
     // ---------------------------------------------------------------
     // 專案設定：目標建物 GPS 座標與模型資訊
@@ -110,6 +111,7 @@
     let xrSession = null;
     let hitTestSource = null;
     let hitTestSourceRequested = false;
+    let previewModeActive = false; // 桌面/不支援 AR 的裝置：改用一般 3D 場景預覽模型，不走 AR 流程
 
     // 重要：XRFrame 物件只在當次 rAF callback 內有效，不能存起來給按鈕(非同步事件)之後重複使用。
     // 這裡改成只快取「數值/向量」，按鈕只讀這些快取值，不再依賴過期的 frame 物件。
@@ -239,12 +241,12 @@
     });
     document.getElementById('floor-up').addEventListener('click', () => {
       if (!model) return;
-      model.position.y += 3;
+      model.position.y -= 3;
       updateStatus('Moved up one floor (+3m, current Y: ' + model.position.y.toFixed(2) + ')');
     });
     document.getElementById('floor-down').addEventListener('click', () => {
       if (!model) return;
-      model.position.y -= 3;
+      model.position.y += 3;
       updateStatus('Moved down one floor (-3m, current Y: ' + model.position.y.toFixed(2) + ')');
     });
     document.getElementById('recalibrate-btn').addEventListener('click', () => {
@@ -317,6 +319,26 @@
       });
     }
 
+    // ---------------------------------------------------------------
+    // 邊緣線顯示：模擬 Rhino「彩現 + 顯示邊緣」模式，統一黑色線
+    // 用 Three.js 內建的 EdgesGeometry 在執行期即時計算，不需要修改模型檔案本身
+    // ---------------------------------------------------------------
+    const SHOW_EDGES = true;
+    const EDGE_COLOR = 0x000000;
+    const EDGE_ANGLE_THRESHOLD = 30; // 相鄰面法線夾角超過幾度才畫線，數字越小線越多、越細碎
+
+    function addEdgeOutlines(root) {
+      const edgeMaterial = new THREE.LineBasicMaterial({ color: EDGE_COLOR });
+      root.traverse((node) => {
+        if (node.isMesh && node.geometry) {
+          const edgesGeo = new THREE.EdgesGeometry(node.geometry, EDGE_ANGLE_THRESHOLD);
+          const edgeLines = new THREE.LineSegments(edgesGeo, edgeMaterial);
+          // 掛在 mesh 底下當子物件，這樣模型之後的 scale/position/rotation 調整會一併帶著邊緣線走
+          node.add(edgeLines);
+        }
+      });
+    }
+
     const loader = new GLTFLoader();
     loader.load(
       MODEL_URL,
@@ -327,7 +349,13 @@
         if (USE_FLAT_SHADING_FALLBACK) {
           applyFlatShadingFallback(model);
         }
+        if (SHOW_EDGES) {
+          addEdgeOutlines(model);
+        }
         scene.add(model);
+        if (previewModeActive) {
+          model.visible = true; // 預覽模式沒有 GPS/hit-test 流程，模型載入完就直接顯示
+        }
         updateStatus('Model loaded. Waiting for AR plane detection.');
       },
       undefined,
@@ -353,17 +381,15 @@
       startBtn.textContent = 'Starting...';
 
       if (!navigator.xr) {
-        updateStatus('This browser does not support WebXR. Please use Chrome on Android.');
-        startBtn.disabled = false;
-        startBtn.textContent = 'Start AR Experience';
+        updateStatus('WebXR not supported by this browser. Switching to desktop preview mode (drag to orbit, scroll to zoom).');
+        startPreviewMode();
         return;
       }
 
       const supported = await navigator.xr.isSessionSupported('immersive-ar');
       if (!supported) {
-        updateStatus('This device/browser does not support immersive-ar. Please use Chrome on an ARCore-supported Android device.');
-        startBtn.disabled = false;
-        startBtn.textContent = 'Start AR Experience';
+        updateStatus('immersive-ar not supported on this device/browser. Switching to desktop preview mode (drag to orbit, scroll to zoom).');
+        startPreviewMode();
         return;
       }
 
@@ -416,6 +442,42 @@
       floorRow.style.display = 'none';
       adjustRow2.style.display = 'none';
       renderer.setAnimationLoop(null);
+    }
+
+    // ---------------------------------------------------------------
+    // 桌面預覽模式：裝置/瀏覽器不支援 immersive-ar 時的退路，
+    // 跳過 GPS/羅盤/hit-test，直接用一般 Three.js 場景 + 滑鼠軌道控制顯示模型，
+    // 方便在筆電上檢查模型外觀(邊緣線、光照、材質)，不需要手機也不需要部署到 GitHub Pages。
+    // ---------------------------------------------------------------
+    let previewControls = null;
+
+    function startPreviewMode() {
+      previewModeActive = true;
+      startBtn.style.display = 'none';
+      adjustRow.style.display = 'flex';   // 高度/旋轉按鈕在預覽模式一樣可以用，方便檢查模型各角度
+      floorRow.style.display = 'flex';
+      // GPS 校準/放置按鈕在預覽模式沒有意義(沒有真實定位)，維持隱藏
+      adjustRow2.style.display = 'none';
+
+      scene.background = new THREE.Color(0xdddddd); // 給一個中性背景色方便看清楚模型輪廓與邊緣線
+
+      camera.position.set(4, 3, 6);
+      camera.lookAt(0, 1, 0);
+
+      previewControls = new OrbitControls(camera, renderer.domElement);
+      previewControls.target.set(0, 1, 0);
+      previewControls.enableDamping = true;
+      previewControls.update();
+
+      if (model) {
+        model.visible = true;
+        model.position.set(0, 0, 0);
+      }
+
+      renderer.setAnimationLoop(() => {
+        previewControls.update();
+        renderer.render(scene, camera);
+      });
     }
 
     async function initHitTestSource() {
