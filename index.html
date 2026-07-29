@@ -35,6 +35,30 @@
     #adjust-row, #adjust-row2, #floor-row { display: flex; gap: 8px; }
     #adjust-row button, #adjust-row2 button, #floor-row button { padding: 8px 14px; font-size: 14px; background: #444; }
 
+    #light-row {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      width: 92%; max-width: 420px;
+    }
+    #light-row label {
+      color: #e6d6ff; font-size: 13px; font-weight: bold;
+    }
+    #light-angle-slider {
+      width: 100%; height: 8px; border-radius: 4px; outline: none;
+      -webkit-appearance: none; appearance: none;
+      background: linear-gradient(to right, #4a148c, #b388ff);
+    }
+    #light-angle-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 24px; height: 24px; border-radius: 50%;
+      background: #9c27b0; border: 2px solid #f3e5ff;
+      cursor: pointer;
+    }
+    #light-angle-slider::-moz-range-thumb {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: #9c27b0; border: 2px solid #f3e5ff;
+      cursor: pointer;
+    }
+
     /* 按下時的視覺回饋：灰色按鈕轉藍色、主按鈕變暗，並縮小一點模擬按壓感 */
     #adjust-row button.pressed, #adjust-row2 button.pressed, #floor-row button.pressed {
       background: #2979ff;
@@ -71,6 +95,10 @@
         <button id="place-here-btn">Place Here</button>
       </div>
       <button id="start-btn">Start AR Experience</button>
+      <div id="light-row" style="display:none;">
+        <label for="light-angle-slider">Light Angle: <span id="light-angle-value">0</span>°</label>
+        <input type="range" id="light-angle-slider" min="0" max="360" step="5" value="0">
+      </div>
     </div>
   </div>
 
@@ -129,6 +157,13 @@
     const adjustRow = document.getElementById('adjust-row');
     const adjustRow2 = document.getElementById('adjust-row2');
     const floorRow = document.getElementById('floor-row');
+    const lightRow = document.getElementById('light-row');
+    const lightAngleSlider = document.getElementById('light-angle-slider');
+    const lightAngleValue = document.getElementById('light-angle-value');
+    lightAngleSlider.addEventListener('input', () => {
+      lightAngleDeg = Number(lightAngleSlider.value);
+      lightAngleValue.textContent = lightAngleDeg;
+    });
 
     function updateStatus(newMessage) {
       if (newMessage !== undefined) {
@@ -283,26 +318,30 @@
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
 
-    // 環境光(Hemisphere)，均勻沒有方向性陰影
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 0.5);
+    // 環境光(Hemisphere)，均勻沒有方向性陰影，作為基礎照明
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 0.9);
     scene.add(hemiLight);
 
-    // 四顆方向光，從東南西北四個角度打光。
-    // 座標假設：+X=東, -X=西, +Z=南, -Z=北(純粹是場景內固定的美術方向，跟 GPS 羅盤方向無關)
-    // 依需求調整：西南(SW)方向增強、東北(NE)方向減弱，東南(SE)/西北(NW)維持原強度
-    const BASE_FILL_INTENSITY = 0.35;
-    const lightConfigs = [
-      { name: 'SE', position: [ 1, 2,  1], intensity: BASE_FILL_INTENSITY * 0.5 },       // 東南
-      { name: 'SW', position: [-1, 2,  1], intensity: BASE_FILL_INTENSITY * 0.0 },       // 西南
-      { name: 'NE', position: [ 1, 2, -1], intensity: BASE_FILL_INTENSITY * 5.0 },       // 東北
-      { name: 'NW', position: [-1, 2, -1], intensity: BASE_FILL_INTENSITY * 0.5 }        // 西北
-    ];
-    const fillLights = lightConfigs.map((cfg) => {
-      const l = new THREE.DirectionalLight(0xffffff, cfg.intensity);
-      l.position.set(cfg.position[0], cfg.position[1], cfg.position[2]);
-      scene.add(l);
-      return l;
-    });
+    // 單一方向光，強度固定，角度可用畫面下方的滑桿(或 +5°/-5° 按鈕)即時旋轉調整
+    const MAIN_LIGHT_INTENSITY = 1.0;
+    const MAIN_LIGHT_DISTANCE = 5;
+    const mainLight = new THREE.DirectionalLight(0xffffff, MAIN_LIGHT_INTENSITY);
+    scene.add(mainLight);
+    scene.add(mainLight.target); // DirectionalLight 的 target 必須加入場景，調整 target.position 才會生效
+
+    let lightAngleDeg = 0; // 0~360，水平面上的旋轉角度(繞 Y 軸)
+
+    // 依目前 lightAngleDeg 重新計算光源在水平面上的位置(高度固定，只旋轉水平方向)
+    function updateMainLightPosition() {
+      const rad = toRad(lightAngleDeg);
+      const x = Math.sin(rad) * MAIN_LIGHT_DISTANCE;
+      const z = Math.cos(rad) * MAIN_LIGHT_DISTANCE;
+      mainLight.position.set(x, MAIN_LIGHT_DISTANCE * 0.8, z);
+      if (model) {
+        mainLight.target.position.copy(model.position);
+      }
+    }
+    updateMainLightPosition();
 
     // 若實測後模型仍然有不想要的明暗差異，可以把這個開關打開，
     // 模型會改用不受光照影響的原始顏色顯示，保證絕對均勻
@@ -420,6 +459,7 @@
         adjustRow.style.display = 'flex';
         floorRow.style.display = 'flex';
         adjustRow2.style.display = 'flex';
+        lightRow.style.display = 'flex';
 
         renderer.setAnimationLoop(onXRFrame);
       } catch (e) {
@@ -443,6 +483,7 @@
       adjustRow.style.display = 'none';
       floorRow.style.display = 'none';
       adjustRow2.style.display = 'none';
+      lightRow.style.display = 'none';
       renderer.setAnimationLoop(null);
     }
 
@@ -458,6 +499,7 @@
       startBtn.style.display = 'none';
       adjustRow.style.display = 'flex';   // 高度/旋轉按鈕在預覽模式一樣可以用，方便檢查模型各角度
       floorRow.style.display = 'flex';
+      lightRow.style.display = 'flex';    // 光線角度滑桿在預覽模式也能用，方便檢查光照效果
       // GPS 校準/放置按鈕在預覽模式沒有意義(沒有真實定位)，維持隱藏
       adjustRow2.style.display = 'none';
 
@@ -478,6 +520,7 @@
 
       renderer.setAnimationLoop(() => {
         previewControls.update();
+        updateMainLightPosition();
         renderer.render(scene, camera);
       });
     }
@@ -526,6 +569,7 @@
         }
       }
 
+      updateMainLightPosition();
       renderer.render(scene, camera);
     }
 
