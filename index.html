@@ -283,21 +283,23 @@
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
 
-    // 環境光(Hemisphere)拉高強度，作為主要照明來源，天生就是均勻的環境光，沒有方向性陰影
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 1.3);
+    // 環境光(Hemisphere)，均勻沒有方向性陰影
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 0.3);
     scene.add(hemiLight);
 
-    // 四顆低強度方向光，從東南西北四個角度均勻打光，
-    // 每顆強度都刻意壓低且彼此相同，讓每個面都有基本亮度、不會有明顯的「亮面/暗面」對比
-    const lightDirs = [
-      [1, 2, 1],
-      [-1, 2, 1],
-      [1, 2, -1],
-      [-1, 2, -1]
+    // 四顆方向光，從東南西北四個角度打光。
+    // 座標假設：+X=東, -X=西, +Z=南, -Z=北(純粹是場景內固定的美術方向，跟 GPS 羅盤方向無關)
+    // 依需求調整：西南(SW)方向增強、東北(NE)方向減弱，東南(SE)/西北(NW)維持原強度
+    const BASE_FILL_INTENSITY = 0.35;
+    const lightConfigs = [
+      { name: 'SE', position: [ 1, 2,  1], intensity: BASE_FILL_INTENSITY * 0.0 },       // 東南
+      { name: 'SW', position: [-1, 2,  1], intensity: BASE_FILL_INTENSITY * 5.0 },       // 西南
+      { name: 'NE', position: [ 1, 2, -1], intensity: BASE_FILL_INTENSITY * 0.0 },       // 東北
+      { name: 'NW', position: [-1, 2, -1], intensity: BASE_FILL_INTENSITY * 0.0 }        // 西北
     ];
-    const fillLights = lightDirs.map((pos) => {
-      const l = new THREE.DirectionalLight(0xffffff, 0.35);
-      l.position.set(pos[0], pos[1], pos[2]);
+    const fillLights = lightConfigs.map((cfg) => {
+      const l = new THREE.DirectionalLight(0xffffff, cfg.intensity);
+      l.position.set(cfg.position[0], cfg.position[1], cfg.position[2]);
       scene.add(l);
       return l;
     });
