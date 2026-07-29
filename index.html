@@ -284,7 +284,7 @@
     const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
 
     // 環境光(Hemisphere)，均勻沒有方向性陰影
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 0.3);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 0.5);
     scene.add(hemiLight);
 
     // 四顆方向光，從東南西北四個角度打光。
@@ -292,10 +292,10 @@
     // 依需求調整：西南(SW)方向增強、東北(NE)方向減弱，東南(SE)/西北(NW)維持原強度
     const BASE_FILL_INTENSITY = 0.35;
     const lightConfigs = [
-      { name: 'SE', position: [ 1, 2,  1], intensity: BASE_FILL_INTENSITY * 0.0 },       // 東南
+      { name: 'SE', position: [ 1, 2,  1], intensity: BASE_FILL_INTENSITY * 0.5 },       // 東南
       { name: 'SW', position: [-1, 2,  1], intensity: BASE_FILL_INTENSITY * 5.0 },       // 西南
       { name: 'NE', position: [ 1, 2, -1], intensity: BASE_FILL_INTENSITY * 0.0 },       // 東北
-      { name: 'NW', position: [-1, 2, -1], intensity: BASE_FILL_INTENSITY * 0.0 }        // 西北
+      { name: 'NW', position: [-1, 2, -1], intensity: BASE_FILL_INTENSITY * 0.5 }        // 西北
     ];
     const fillLights = lightConfigs.map((cfg) => {
       const l = new THREE.DirectionalLight(0xffffff, cfg.intensity);
