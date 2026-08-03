@@ -322,12 +322,64 @@
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 0.9);
     scene.add(hemiLight);
 
-    // 單一方向光，強度固定，角度可用畫面下方的滑桿(或 +5°/-5° 按鈕)即時旋轉調整
-    const MAIN_LIGHT_INTENSITY = 1.0;
+    // 單一方向光，角度可用畫面下方的滑桿(或 +5°/-5° 按鈕)即時旋轉調整
     const MAIN_LIGHT_DISTANCE = 5;
-    const mainLight = new THREE.DirectionalLight(0xffffff, MAIN_LIGHT_INTENSITY);
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
     scene.add(mainLight);
     scene.add(mainLight.target); // DirectionalLight 的 target 必須加入場景，調整 target.position 才會生效
+
+    // ---------------------------------------------------------------
+    // 雙模式光照設定：
+    // AR 模式：維持均勻光照、不算陰影(戶外疊加相機畫面時可讀性優先，效能也較省)
+    // Preview 模式：較強的方向光對比 + 開啟即時陰影貼圖，模擬光線穿過窗戶被牆面遮擋的效果，適合室內精緻展示
+    // ---------------------------------------------------------------
+    const LIGHTING_PROFILES = {
+      ar: { mainIntensity: 1.0, hemiIntensity: 0.9, shadows: false },
+      preview: { mainIntensity: 1.6, hemiIntensity: 0.35, shadows: true }
+    };
+
+    function applyLightingProfile(profileName) {
+      const profile = LIGHTING_PROFILES[profileName];
+      mainLight.intensity = profile.mainIntensity;
+      hemiLight.intensity = profile.hemiIntensity;
+      mainLight.castShadow = profile.shadows;
+      renderer.shadowMap.enabled = profile.shadows;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      previewGround.visible = profile.shadows;
+    }
+
+    // 陰影只在模型的自身幾何範圍內有意義，這裡給一個寬鬆但夠用的陰影攝影機範圍，
+    // 如果模型比較大/比較小，這幾個數字可能需要跟著調整，才能讓陰影解析度用在刀口上
+    mainLight.shadow.mapSize.set(2048, 2048);
+    mainLight.shadow.camera.left = -10;
+    mainLight.shadow.camera.right = 10;
+    mainLight.shadow.camera.top = 10;
+    mainLight.shadow.camera.bottom = -10;
+    mainLight.shadow.camera.near = 0.5;
+    mainLight.shadow.camera.far = 50;
+    mainLight.shadow.bias = -0.001;
+    mainLight.shadow.camera.updateProjectionMatrix();
+
+    // 只在 Preview 模式顯示的地面(ShadowMaterial 只會渲染陰影本身，其餘部分完全透明，
+    // 不會在 AR 模式下多一塊奇怪的灰色地板)
+    const previewGround = new THREE.Mesh(
+      new THREE.PlaneGeometry(50, 50),
+      new THREE.ShadowMaterial({ opacity: 0.35 })
+    );
+    previewGround.rotation.x = -Math.PI / 2;
+    previewGround.receiveShadow = true;
+    previewGround.visible = false;
+    scene.add(previewGround);
+
+    // 讓模型的每個 mesh 都能投射/接收陰影(只有在 Preview 模式、mainLight.castShadow=true 時才會真正計算)
+    function enableShadowsOnModel(root) {
+      root.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+    }
 
     let lightAngleDeg = 0; // 0~360，水平面上的旋轉角度(繞 Y 軸)
 
@@ -339,8 +391,10 @@
       mainLight.position.set(x, MAIN_LIGHT_DISTANCE * 0.8, z);
       if (model) {
         mainLight.target.position.copy(model.position);
+        previewGround.position.set(model.position.x, model.position.y - 0.01, model.position.z);
       }
     }
+    applyLightingProfile('ar'); // 預設先套用 AR 模式的均勻光照，避免尚未進入任何模式前就啟用陰影運算
     updateMainLightPosition();
 
     // 若實測後模型仍然有不想要的明暗差異，可以把這個開關打開，
@@ -393,6 +447,7 @@
         if (SHOW_EDGES) {
           addEdgeOutlines(model);
         }
+        enableShadowsOnModel(model);
         scene.add(model);
         if (previewModeActive) {
           model.visible = true; // 預覽模式沒有 GPS/hit-test 流程，模型載入完就直接顯示
@@ -454,6 +509,7 @@
 
         renderer.xr.setReferenceSpaceType('local');
         await renderer.xr.setSession(session);
+        applyLightingProfile('ar');
 
         startBtn.style.display = 'none';
         adjustRow.style.display = 'flex';
@@ -496,6 +552,7 @@
 
     function startPreviewMode() {
       previewModeActive = true;
+      applyLightingProfile('preview');
       startBtn.style.display = 'none';
       adjustRow.style.display = 'flex';   // 高度/旋轉按鈕在預覽模式一樣可以用，方便檢查模型各角度
       floorRow.style.display = 'flex';
