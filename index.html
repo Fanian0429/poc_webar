@@ -323,7 +323,8 @@
     scene.add(hemiLight);
 
     // 單一方向光，角度可用畫面下方的滑桿(或 +5°/-5° 按鈕)即時旋轉調整
-    const MAIN_LIGHT_DISTANCE = 5;
+    // 這個距離會在模型載入完成後，依實際包圍球大小重新計算(見 fitShadowToModel)，這裡只是模型載入前的暫時預設值
+    let MAIN_LIGHT_DISTANCE = 5;
     const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
     scene.add(mainLight);
     scene.add(mainLight.target); // DirectionalLight 的 target 必須加入場景，調整 target.position 才會生效
@@ -348,8 +349,8 @@
       previewGround.visible = profile.shadows;
     }
 
-    // 陰影只在模型的自身幾何範圍內有意義，這裡給一個寬鬆但夠用的陰影攝影機範圍，
-    // 如果模型比較大/比較小，這幾個數字可能需要跟著調整，才能讓陰影解析度用在刀口上
+    // 陰影攝影機範圍會在模型載入完成後依實際大小動態計算(見 fitShadowToModel)，
+    // 這裡先給一組載入前的預設值，避免 model 尚未存在時報錯
     mainLight.shadow.mapSize.set(2048, 2048);
     mainLight.shadow.camera.left = -10;
     mainLight.shadow.camera.right = 10;
@@ -359,6 +360,32 @@
     mainLight.shadow.camera.far = 50;
     mainLight.shadow.bias = -0.001;
     mainLight.shadow.camera.updateProjectionMatrix();
+
+    // ---------------------------------------------------------------
+    // 依模型實際包圍球(bounding sphere)大小，動態計算光源距離與陰影攝影機視錐範圍。
+    // 修正原因：原本用固定數字(距離5、視錐±10)是用小型模型的假設寫死的，
+    // 如果實際模型(例如三層樓建物)比這個範圍大，陰影攝影機會框不住整棟建物，
+    // 導致部分結構(如上層樓板)沒有被算進陰影運算，造成光線不合理地穿透、
+    // 或轉到某些角度時牆面/窗框失去遮擋效果。這裡改成量測模型實際大小後自動抓一個足夠寬鬆的範圍。
+    // ---------------------------------------------------------------
+    function fitShadowToModel(root) {
+      const box = new THREE.Box3().setFromObject(root);
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const radius = Math.max(sphere.radius, 1); // 至少給 1，避免極端情況下 radius 算出 0
+
+      MAIN_LIGHT_DISTANCE = radius * 3; // 光源明顯拉遠到包圍球半徑的 3 倍，確保不會落在建物幾何範圍內部
+      const frustumSize = radius * 1.6; // 視錐範圍留一些餘裕，避免邊緣被裁到
+
+      mainLight.shadow.camera.left = -frustumSize;
+      mainLight.shadow.camera.right = frustumSize;
+      mainLight.shadow.camera.top = frustumSize;
+      mainLight.shadow.camera.bottom = -frustumSize;
+      mainLight.shadow.camera.near = Math.max(0.1, MAIN_LIGHT_DISTANCE - radius * 2);
+      mainLight.shadow.camera.far = MAIN_LIGHT_DISTANCE + radius * 2;
+      mainLight.shadow.camera.updateProjectionMatrix();
+
+      updateMainLightPosition();
+    }
 
     // 只在 Preview 模式顯示的地面(ShadowMaterial 只會渲染陰影本身，其餘部分完全透明，
     // 不會在 AR 模式下多一塊奇怪的灰色地板)
@@ -449,6 +476,7 @@
         }
         enableShadowsOnModel(model);
         scene.add(model);
+        fitShadowToModel(model);
         if (previewModeActive) {
           model.visible = true; // 預覽模式沒有 GPS/hit-test 流程，模型載入完就直接顯示
         }
