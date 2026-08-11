@@ -121,6 +121,7 @@
     const TARGET_LAT = 24.183192;
     const TARGET_LON = 120.613790;
     const MODEL_URL = './townhouse.glb';
+    const MODEL_URL2 = './Chanley.glb';
     const MODEL_SCALE = 1; // 若模型單位是公尺，先從 1 開始測試，依實際狀況調整
 
     // 羅盤讀值在不同裝置/瀏覽器上常有系統性偏移(常見 ±15~30°)。
@@ -542,7 +543,7 @@
 
     const loader = new GLTFLoader();
     loader.load(
-      MODEL_URL,
+      MODEL_URL2,
       (gltf) => {
         model = gltf.scene;
         model.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
