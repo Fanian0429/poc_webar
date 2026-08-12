@@ -693,14 +693,14 @@
       startBtn.textContent = 'Starting...';
 
       if (!navigator.xr) {
-        updateStatus('WebXR not supported by this browser. Switching to desktop preview mode (drag to orbit, scroll to zoom).');
+        updateStatus('WebXR not supported by this browser. Switching to desktop preview mode (drag to orbit, scroll to zoom, WASD+QE to fly, hold Shift to move faster).');
         startPreviewMode();
         return;
       }
 
       const supported = await navigator.xr.isSessionSupported('immersive-ar');
       if (!supported) {
-        updateStatus('immersive-ar not supported on this device/browser. Switching to desktop preview mode (drag to orbit, scroll to zoom).');
+        updateStatus('immersive-ar not supported on this device/browser. Switching to desktop preview mode (drag to orbit, scroll to zoom, WASD+QE to fly, hold Shift to move faster).');
         startPreviewMode();
         return;
       }
@@ -760,6 +760,60 @@
     }
 
     // ---------------------------------------------------------------
+    // 桌面預覽模式：WASD + Q/E 自由飛行移動(概念類似 Blender 的 Shift+`飛行導覽)
+    // 滑鼠 drag 依然透過 OrbitControls 旋轉視角，這裡另外用鍵盤把「攝影機位置」與
+    // 「OrbitControls 的軌道中心(target)」同步平移，等於整個人一起飛過去，
+    // 而不是繞著原地不動的舊中心打轉，藉此突破滾輪 dolly 的距離限制，可自由飛到建物任何角落。
+    // ---------------------------------------------------------------
+    const flyKeysPressed = {};
+    const FLY_BASE_SPEED = 2.5;     // 基礎移動速度(公尺/秒)
+    const FLY_BOOST_MULTIPLIER = 3; // 按住 Shift 加速飛行
+    const flyClock = new THREE.Clock();
+
+    window.addEventListener('keydown', (e) => {
+      flyKeysPressed[e.code] = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      flyKeysPressed[e.code] = false;
+    });
+    // 分頁切到背景/視窗失焦時，把殘留的按鍵狀態全部清掉，
+    // 避免使用者切走視窗時剛好按著 W，回來後攝影機還在暗自持續往前飛
+    window.addEventListener('blur', () => {
+      Object.keys(flyKeysPressed).forEach((k) => { flyKeysPressed[k] = false; });
+    });
+
+    function updateFlyMovement() {
+      if (!previewModeActive || !previewControls) return;
+
+      const dt = flyClock.getDelta();
+
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward); // 攝影機目前實際看向的方向(含俯仰角度)，達到真正的自由飛行(不只是水平走動)
+      const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+      const up = new THREE.Vector3(0, 1, 0); // Q/E 固定沿世界垂直軸移動，方便維持樓層高度感，不受目前視角俯仰影響
+
+      const moveDir = new THREE.Vector3();
+      if (flyKeysPressed['KeyW']) moveDir.add(forward);
+      if (flyKeysPressed['KeyS']) moveDir.sub(forward);
+      if (flyKeysPressed['KeyD']) moveDir.add(right);
+      if (flyKeysPressed['KeyA']) moveDir.sub(right);
+      if (flyKeysPressed['KeyE']) moveDir.add(up);
+      if (flyKeysPressed['KeyQ']) moveDir.sub(up);
+
+      if (moveDir.lengthSq() === 0) return;
+
+      moveDir.normalize();
+      const boost = (flyKeysPressed['ShiftLeft'] || flyKeysPressed['ShiftRight']) ? FLY_BOOST_MULTIPLIER : 1;
+      moveDir.multiplyScalar(FLY_BASE_SPEED * boost * dt);
+
+      // 攝影機與軌道中心一起平移：OrbitControls.update() 每一幀都會用「目前攝影機位置 - target」
+      // 重新算出球座標，只要兩者位移量相同，旋轉/縮放的相對關係就完全不受影響，
+      // 滑鼠拖曳依然能以移動後的新位置為中心自然旋轉。
+      camera.position.add(moveDir);
+      previewControls.target.add(moveDir);
+    }
+
+    // ---------------------------------------------------------------
     // 桌面預覽模式：裝置/瀏覽器不支援 immersive-ar 時的退路，
     // 跳過 GPS/羅盤/hit-test，直接用一般 Three.js 場景 + 滑鼠軌道控制顯示模型，
     // 方便在筆電上檢查模型外觀(邊緣線、光照、材質)，不需要手機也不需要部署到 GitHub Pages。
@@ -792,6 +846,7 @@
       }
 
       renderer.setAnimationLoop(() => {
+        updateFlyMovement();
         previewControls.update();
         updateMainLightPosition();
         renderer.render(scene, camera);
