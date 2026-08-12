@@ -370,10 +370,22 @@
       preview: { mainIntensity: 1.6, hemiIntensity: 0.35, shadows: true }
     };
 
+    let currentProfileName = 'ar'; // 記錄目前套用的是哪一組光照 profile，切換模型時才知道「預設值」該回到多少
+    const CHANLEY_HEMI_BOOST = 2; // 切到 Chanley.glb 時，環境光(HemisphereLight)要提升到的強度
+
+    // 環境光(HemisphereLight)強度的單一決策點：預設沿用目前光照 profile 的基礎值，
+    // 但只要「目前作用中的模型」是 Chanley.glb，就改用加強值；切回 townhouse 就自動還原成 profile 預設值。
+    // 統一寫在這裡呼叫，而不是在各處分別設定 hemiLight.intensity，避免之後不同地方各自寫死數字互相打架。
+    function updateHemiLightForActiveModel() {
+      hemiLight.intensity = (activeModelKey === 'chanley')
+        ? CHANLEY_HEMI_BOOST
+        : LIGHTING_PROFILES[currentProfileName].hemiIntensity;
+    }
+
     function applyLightingProfile(profileName) {
+      currentProfileName = profileName;
       const profile = LIGHTING_PROFILES[profileName];
       mainLight.intensity = profile.mainIntensity;
-      hemiLight.intensity = profile.hemiIntensity;
       mainLight.castShadow = profile.shadows;
       renderer.shadowMap.enabled = profile.shadows;
       // PCFSoftShadowMap 本身就會套用柔化過的邊緣濾波，是目前預設、相容性/效能最穩妥的選項。
@@ -387,6 +399,7 @@
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       }
       previewGround.visible = profile.shadows;
+      updateHemiLightForActiveModel(); // profile 切換(AR/Preview)時，環境光也要重新依目前模型決定要不要套加強值
     }
 
     // 陰影攝影機範圍會在模型載入完成後依實際大小動態計算(見 computeFitData/applyFitData)，
@@ -661,6 +674,7 @@
       model = newModel;
       activeModelKey = key;
       applyFitData(entry.fitData);
+      updateHemiLightForActiveModel(); // 切到 Chanley 加強環境光，切回 townhouse 還原 profile 預設值
       updateModelButtonsUI();
       updateStatus('Switched to ' + MODEL_CONFIGS[key].label + '.');
     }
@@ -814,6 +828,63 @@
     }
 
     // ---------------------------------------------------------------
+    // 桌面預覽模式：滑鼠左鍵「原地環顧」(look-around)，跟右鍵的 OrbitControls 旋轉不同——
+    // 右鍵旋轉是攝影機繞著 target「移動位置」；左鍵這裡改成只轉動攝影機朝向，
+    // 攝影機位置完全不動，概念上更接近 FPS/遊戲引擎的滑鼠視角控制，方便搭配 WASD+QE 飛行使用。
+    //
+    // 做法：左鍵拖曳時直接用 yaw(繞世界 Y 軸)/pitch(繞攝影機本地 X 軸)的 Euler 角度
+    // (順序 'YXZ'，不會有 roll)去設定 camera.quaternion；每次更新完，再把 OrbitControls 的
+    // target 重新擺到「攝影機新朝向的正前方、原本的距離處」——這樣下次改用右鍵環繞旋轉
+    // 或滾輪縮放時，OrbitControls 才不會因為 target 沒跟著轉而發生鏡頭瞬間跳走的狀況。
+    // ---------------------------------------------------------------
+    const LOOK_SENSITIVITY = 0.0025;             // 每 1px 滑鼠位移對應的旋轉弧度，數字越大手感越靈敏
+    const LOOK_PITCH_LIMIT = Math.PI / 2 - 0.01; // 上下俯仰角限制在接近 ±90°，避免整個人翻過去
+
+    let lookDragActive = false;
+    let lastPointerX = 0;
+    let lastPointerY = 0;
+    const lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+    function onLookPointerDown(event) {
+      if (!previewModeActive || event.button !== 0) return;
+      lookDragActive = true;
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+      // 從目前攝影機的實際朝向反推 yaw/pitch，讓這次拖曳從目前視角銜接，不會瞬間跳掉
+      lookEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+    }
+
+    function onLookPointerMove(event) {
+      if (!lookDragActive) return;
+      const dx = event.clientX - lastPointerX;
+      const dy = event.clientY - lastPointerY;
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+
+      lookEuler.y -= dx * LOOK_SENSITIVITY;
+      lookEuler.x -= dy * LOOK_SENSITIVITY;
+      lookEuler.x = Math.max(-LOOK_PITCH_LIMIT, Math.min(LOOK_PITCH_LIMIT, lookEuler.x));
+      camera.quaternion.setFromEuler(lookEuler);
+
+      if (previewControls) {
+        const distanceToTarget = camera.position.distanceTo(previewControls.target);
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        previewControls.target.copy(camera.position).addScaledVector(forward, distanceToTarget);
+      }
+    }
+
+    function onLookPointerUp(event) {
+      if (event.button !== 0) return;
+      lookDragActive = false;
+    }
+
+    renderer.domElement.addEventListener('pointerdown', onLookPointerDown);
+    renderer.domElement.addEventListener('pointermove', onLookPointerMove);
+    window.addEventListener('pointerup', onLookPointerUp);
+    // 視窗失焦時(例如切分頁時剛好按著左鍵)也要清掉拖曳狀態，避免回來後角度突然亂跳
+    window.addEventListener('blur', () => { lookDragActive = false; });
+
+    // ---------------------------------------------------------------
     // 桌面預覽模式：裝置/瀏覽器不支援 immersive-ar 時的退路，
     // 跳過 GPS/羅盤/hit-test，直接用一般 Three.js 場景 + 滑鼠軌道控制顯示模型，
     // 方便在筆電上檢查模型外觀(邊緣線、光照、材質)，不需要手機也不需要部署到 GitHub Pages。
@@ -837,7 +908,16 @@
 
       previewControls = new OrbitControls(camera, renderer.domElement);
       previewControls.target.set(0, 1, 0);
-      previewControls.enableDamping = true;
+      previewControls.enableDamping = false;
+      // 左鍵這裡改成 null，停用 OrbitControls 內建對左鍵的處理，改由上面自訂的
+      // 「原地環顧」(look-around)邏輯接管——左鍵拖曳只轉動攝影機朝向，攝影機位置不會移動。
+      // 右鍵改成 ROTATE，變成環繞旋轉(攝影機繞著 target 移動位置)，Shift+右鍵則會是平移(PAN)，
+      // 這是 OrbitControls 內建的修飾鍵邏輯，只要哪個按鍵設成 ROTATE，Shift+那個按鍵就會自動變成 PAN。
+      previewControls.mouseButtons = {
+        LEFT: null,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE
+      };
       previewControls.update();
 
       if (model) {
