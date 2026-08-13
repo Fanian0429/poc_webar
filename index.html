@@ -35,17 +35,6 @@
     #adjust-row, #adjust-row2, #floor-row { display: flex; gap: 8px; }
     #adjust-row button, #adjust-row2 button, #floor-row button { padding: 8px 14px; font-size: 14px; background: #444; }
 
-    /* 模型切換按鈕：淺紫色底、白色外框、白色字，目前作用中的模型改灰底 */
-    #model-row { display: flex; gap: 12px; }
-    #model-row button {
-      width: 46px; height: 46px; padding: 0;
-      display: flex; align-items: center; justify-content: center;
-      border-radius: 50%; font-size: 18px;
-      background: #b388ff; border: 2px solid #ffffff; color: #ffffff;
-    }
-    #model-row button.model-btn-active { background: #555555; }
-    #model-row button.pressed { filter: brightness(0.85); transform: scale(0.92); }
-
     #light-row {
       display: flex; flex-direction: column; align-items: center; gap: 4px;
       width: 92%; max-width: 420px;
@@ -91,10 +80,6 @@
     </div>
 
     <div id="controls">
-      <div id="model-row">
-        <button id="model-btn-1" class="model-btn-active">1</button>
-        <button id="model-btn-2">2</button>
-      </div>
       <div id="adjust-row" style="display:none;">
         <button id="y-up">Height ▲</button>
         <button id="y-down">Height ▼</button>
@@ -135,15 +120,8 @@
     // ---------------------------------------------------------------
     const TARGET_LAT = 24.183192;
     const TARGET_LON = 120.613790;
-    const MODEL_URL = './townhouse.glb';
-    const MODEL_URL2 = './Chanley.glb';
+    const MODEL_URL = './Chanley.glb';
     const MODEL_SCALE = 1; // 若模型單位是公尺，先從 1 開始測試，依實際狀況調整
-
-    // 可切換模型清單：key 對應按鈕與 models{} 的存放位置，url/label 用於載入與訊息顯示
-    const MODEL_CONFIGS = {
-      townhouse: { url: MODEL_URL, label: 'townhouse.glb' },
-      chanley:   { url: MODEL_URL2, label: 'Chanley.glb' }
-    };
 
     // 羅盤讀值在不同裝置/瀏覽器上常有系統性偏移(常見 ±15~30°)。
     // 可用「Calibrate by GPS」搭配旋轉/高度按鈕現場修正，
@@ -155,10 +133,8 @@
     // ---------------------------------------------------------------
     let userLat = null, userLon = null, gpsAccuracy = null;
     let currentHeading = null;
-    let model = null;              // 目前作用中(顯示中)的模型物件，永遠指向 models[activeModelKey] 載入完成後的物件
+    let model = null;
     let modelPlaced = false;
-    let activeModelKey = 'townhouse'; // 預設啟用 townhouse，對應按鈕「1」
-    const models = {}; // key -> { object3D, fitData }，兩個模型都會各自載入並常駐在場景中，用 visible 切換
 
     let xrSession = null;
     let hitTestSource = null;
@@ -184,8 +160,6 @@
     const lightRow = document.getElementById('light-row');
     const lightAngleSlider = document.getElementById('light-angle-slider');
     const lightAngleValue = document.getElementById('light-angle-value');
-    const modelBtn1 = document.getElementById('model-btn-1'); // townhouse.glb
-    const modelBtn2 = document.getElementById('model-btn-2'); // Chanley.glb
     lightAngleSlider.addEventListener('input', () => {
       lightAngleDeg = Number(lightAngleSlider.value);
       lightAngleValue.textContent = lightAngleDeg;
@@ -349,7 +323,7 @@
     scene.add(hemiLight);
 
     // 單一方向光，角度可用畫面下方的滑桿(或 +5°/-5° 按鈕)即時旋轉調整
-    // 這個距離會在模型載入完成後，依實際包圍球大小重新計算(見 computeFitData/applyFitData)，這裡只是模型載入前的暫時預設值
+    // 這個距離會在模型載入完成後，依實際包圍球大小重新計算(見 fitShadowToModel)，這裡只是模型載入前的暫時預設值
     let MAIN_LIGHT_DISTANCE = 5;
     const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
     scene.add(mainLight);
@@ -367,25 +341,13 @@
 
     const LIGHTING_PROFILES = {
       ar: { mainIntensity: 1.2, hemiIntensity: 0.6, shadows: true },
-      preview: { mainIntensity: 1.6, hemiIntensity: 0.35, shadows: true }
+      preview: { mainIntensity: 1.6, hemiIntensity: 0.6, shadows: true }
     };
 
-    let currentProfileName = 'ar'; // 記錄目前套用的是哪一組光照 profile，切換模型時才知道「預設值」該回到多少
-    const CHANLEY_HEMI_BOOST = 2; // 切到 Chanley.glb 時，環境光(HemisphereLight)要提升到的強度
-
-    // 環境光(HemisphereLight)強度的單一決策點：預設沿用目前光照 profile 的基礎值，
-    // 但只要「目前作用中的模型」是 Chanley.glb，就改用加強值；切回 townhouse 就自動還原成 profile 預設值。
-    // 統一寫在這裡呼叫，而不是在各處分別設定 hemiLight.intensity，避免之後不同地方各自寫死數字互相打架。
-    function updateHemiLightForActiveModel() {
-      hemiLight.intensity = (activeModelKey === 'chanley')
-        ? CHANLEY_HEMI_BOOST
-        : LIGHTING_PROFILES[currentProfileName].hemiIntensity;
-    }
-
     function applyLightingProfile(profileName) {
-      currentProfileName = profileName;
       const profile = LIGHTING_PROFILES[profileName];
       mainLight.intensity = profile.mainIntensity;
+      hemiLight.intensity = profile.hemiIntensity;
       mainLight.castShadow = profile.shadows;
       renderer.shadowMap.enabled = profile.shadows;
       // PCFSoftShadowMap 本身就會套用柔化過的邊緣濾波，是目前預設、相容性/效能最穩妥的選項。
@@ -399,10 +361,9 @@
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       }
       previewGround.visible = profile.shadows;
-      updateHemiLightForActiveModel(); // profile 切換(AR/Preview)時，環境光也要重新依目前模型決定要不要套加強值
     }
 
-    // 陰影攝影機範圍會在模型載入完成後依實際大小動態計算(見 computeFitData/applyFitData)，
+    // 陰影攝影機範圍會在模型載入完成後依實際大小動態計算(見 fitShadowToModel)，
     // 這裡先給一組載入前的預設值，避免 model 尚未存在時報錯
     const SHADOW_MAP_SIZE = 3072; // 從 2048 提高，陰影邊緣鋸齒主要就是解析度不夠細緻造成的
     mainLight.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
@@ -441,49 +402,30 @@
     // 否則地面會被抬到建物半高處，陰影就會浮在半空中(圖3的錯誤)。
     const modelBaseLocalPoint = new THREE.Vector3(0, 0, 0);
 
-    // 純計算：量測模型包圍球，回傳這顆模型專屬的陰影/光源參數，不直接修改任何全域狀態。
-    // 因為現在有兩個模型可以切換，且各自大小、pivot 位置都不同，每個模型都要保留自己的一份計算結果，
-    // 等它變成「目前作用中的模型」時才套用到 mainLight/shadow camera 上(見 applyFitData)。
-    function computeFitData(root) {
+    // 純計算：量測模型包圍球，回傳陰影/光源要用的相關參數，並直接套用到 mainLight/shadow camera 上
+    function fitShadowToModel(root) {
       root.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(root);
       const sphere = box.getBoundingSphere(new THREE.Sphere());
       const radius = Math.max(sphere.radius, 1); // 至少給 1，避免極端情況下 radius 算出 0
 
       const worldToLocal = new THREE.Matrix4().copy(root.matrixWorld).invert();
-      const centerLocalOffset = sphere.center.clone().applyMatrix4(worldToLocal);
-      const baseLocalOffset = new THREE.Vector3(sphere.center.x, box.min.y, sphere.center.z).applyMatrix4(worldToLocal);
+      modelCenterLocalOffset.copy(sphere.center).applyMatrix4(worldToLocal);
+      modelBaseLocalPoint.set(sphere.center.x, box.min.y, sphere.center.z).applyMatrix4(worldToLocal);
 
-      const mainLightDistance = radius * 3; // 光源明顯拉遠到包圍球半徑的 3 倍，確保不會落在建物幾何範圍內部
+      MAIN_LIGHT_DISTANCE = radius * 3; // 光源明顯拉遠到包圍球半徑的 3 倍，確保不會落在建物幾何範圍內部
       const frustumSize = radius * 1.15;
 
-      return {
-        centerLocalOffset,
-        baseLocalOffset,
-        mainLightDistance,
-        frustumSize,
-        // near 只要涵蓋建物本身即可(建物離光源的距離範圍)，維持原本算法；
-        // far 則要放寬更多——陰影不是只投影在建物基座旁邊，樓層越高、光線角度越低，
-        // 陰影會落在離建物更遠的地面上，如果 far 只夠框住建物本身，這些「落在較遠地面」的陰影範圍會被裁掉，
-        // 導致只有一樓附近的陰影正常、上面樓層的陰影在地面上消失。這裡把倍率大幅放寬，確保涵蓋足夠遠的落地範圍。
-        near: Math.max(0.1, mainLightDistance - radius * 2),
-        far: mainLightDistance + radius * 8
-      };
-    }
-
-    // 把某個模型的 fitData 套用到目前的 mainLight / shadow camera 上，並更新光源位置。
-    // 切換作用中模型時只要呼叫這個函式，陰影範圍就會即時對應到新模型的大小。
-    function applyFitData(fitData) {
-      modelCenterLocalOffset.copy(fitData.centerLocalOffset);
-      modelBaseLocalPoint.copy(fitData.baseLocalOffset);
-      MAIN_LIGHT_DISTANCE = fitData.mainLightDistance;
-
-      mainLight.shadow.camera.left = -fitData.frustumSize;
-      mainLight.shadow.camera.right = fitData.frustumSize;
-      mainLight.shadow.camera.top = fitData.frustumSize;
-      mainLight.shadow.camera.bottom = -fitData.frustumSize;
-      mainLight.shadow.camera.near = fitData.near;
-      mainLight.shadow.camera.far = fitData.far;
+      mainLight.shadow.camera.left = -frustumSize;
+      mainLight.shadow.camera.right = frustumSize;
+      mainLight.shadow.camera.top = frustumSize;
+      mainLight.shadow.camera.bottom = -frustumSize;
+      // near 只要涵蓋建物本身即可(建物離光源的距離範圍)，維持原本算法；
+      // far 則要放寬更多——陰影不是只投影在建物基座旁邊，樓層越高、光線角度越低，
+      // 陰影會落在離建物更遠的地面上，如果 far 只夠框住建物本身，這些「落在較遠地面」的陰影範圍會被裁掉，
+      // 導致只有一樓附近的陰影正常、上面樓層的陰影在地面上消失。這裡把倍率大幅放寬，確保涵蓋足夠遠的落地範圍。
+      mainLight.shadow.camera.near = Math.max(0.1, MAIN_LIGHT_DISTANCE - radius * 2);
+      mainLight.shadow.camera.far = MAIN_LIGHT_DISTANCE + radius * 8;
       mainLight.shadow.camera.updateProjectionMatrix();
 
       updateMainLightPosition();
@@ -600,96 +542,35 @@
     }
 
     const loader = new GLTFLoader();
-
-    // 依 key(對應 MODEL_CONFIGS) 載入單一模型，處理完邊緣線/陰影/雙面設定後存進 models[key]。
-    // 兩個模型都會被載入並常駐在場景中(用 visible 切換顯示)，只有目前作用中的那個才會套用到
-    // 場景顯示狀態與光源/陰影參數上，避免背景載入完的另一個模型突然蓋過畫面。
-    function loadModel(key) {
-      const config = MODEL_CONFIGS[key];
-      loader.load(
-        config.url,
-        (gltf) => {
-          const root = gltf.scene;
-          root.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
-          root.visible = false;
-          if (USE_FLAT_SHADING_FALLBACK) {
-            applyFlatShadingFallback(root);
-          }
-          if (FORCE_DOUBLE_SIDED) {
-            forceDoubleSidedMaterials(root);
-          }
-          if (SHOW_EDGES) {
-            addEdgeOutlines(root);
-          }
-          enableShadowsOnModel(root);
-          scene.add(root);
-
-          models[key] = { object3D: root, fitData: computeFitData(root) };
-
-          if (key === activeModelKey) {
-            // 目前預設/使用者已選擇的模型剛好載入完成：直接接手成為顯示中的模型
-            model = root;
-            applyFitData(models[key].fitData);
-            if (previewModeActive) {
-              model.visible = true; // 預覽模式沒有 GPS/hit-test 流程，模型載入完就直接顯示
-            }
-            updateStatus(config.label + ' loaded. Waiting for AR plane detection.');
-          } else {
-            updateStatus(config.label + ' loaded in the background.');
-          }
-        },
-        undefined,
-        (err) => {
-          console.error('GLTF load error', err);
-          updateStatus('Failed to load ' + config.label + '. Please check the file path.');
+    loader.load(
+      MODEL_URL,
+      (gltf) => {
+        model = gltf.scene;
+        model.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
+        model.visible = false;
+        if (USE_FLAT_SHADING_FALLBACK) {
+          applyFlatShadingFallback(model);
         }
-      );
-    }
-
-    // 切換到 key 對應的模型：把目前模型的位置/旋轉/顯示狀態複製過去，讓使用者感覺
-    // 是「同一個已放置好的座標換了一個模型外觀」，不需要重新走一次 GPS/hit-test 流程。
-    function switchToModel(key) {
-      if (key === activeModelKey) return;
-
-      const entry = models[key];
-      if (!entry) {
-        updateStatus(MODEL_CONFIGS[key].label + ' is still loading, please wait...');
-        return;
+        if (FORCE_DOUBLE_SIDED) {
+          forceDoubleSidedMaterials(model);
+        }
+        if (SHOW_EDGES) {
+          addEdgeOutlines(model);
+        }
+        enableShadowsOnModel(model);
+        scene.add(model);
+        fitShadowToModel(model);
+        if (previewModeActive) {
+          model.visible = true; // 預覽模式沒有 GPS/hit-test 流程，模型載入完就直接顯示
+        }
+        updateStatus('Model loaded. Waiting for AR plane detection.');
+      },
+      undefined,
+      (err) => {
+        console.error('GLTF load error', err);
+        updateStatus('Failed to load model. Please check the Chanley.glb path.');
       }
-
-      const oldModel = model;
-      const newModel = entry.object3D;
-
-      if (oldModel) {
-        newModel.position.copy(oldModel.position);
-        newModel.rotation.copy(oldModel.rotation);
-        newModel.visible = oldModel.visible;
-        oldModel.visible = false;
-      } else if (previewModeActive) {
-        // 極少數情況：預設模型都還沒載完，使用者就先切到另一個模型
-        newModel.position.set(0, 0, 0);
-        newModel.visible = true;
-      }
-
-      model = newModel;
-      activeModelKey = key;
-      applyFitData(entry.fitData);
-      updateHemiLightForActiveModel(); // 切到 Chanley 加強環境光，切回 townhouse 還原 profile 預設值
-      updateModelButtonsUI();
-      updateStatus('Switched to ' + MODEL_CONFIGS[key].label + '.');
-    }
-
-    // 按鈕視覺狀態：目前作用中的模型改灰底(model-btn-active)，另一顆維持淺紫色
-    function updateModelButtonsUI() {
-      modelBtn1.classList.toggle('model-btn-active', activeModelKey === 'townhouse');
-      modelBtn2.classList.toggle('model-btn-active', activeModelKey === 'chanley');
-    }
-
-    modelBtn1.addEventListener('click', () => switchToModel('townhouse'));
-    modelBtn2.addEventListener('click', () => switchToModel('chanley'));
-
-    loadModel('townhouse');
-    loadModel('chanley');
+    );
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
