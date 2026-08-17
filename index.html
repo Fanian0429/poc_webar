@@ -69,6 +69,43 @@
       transform: scale(0.96);
     }
 
+    /* 操作說明按鈕：只在 Preview 模式顯示，固定在畫面右下角，尺寸跟其他控制按鈕的高度相近 */
+    #info-btn {
+      position: fixed; right: 16px; bottom: 16px;
+      width: 44px; height: 44px; padding: 0;
+      border: none; border-radius: 50%; background: transparent;
+      pointer-events: auto; z-index: 15;
+      transition: transform 0.08s ease, filter 0.08s ease;
+    }
+    #info-btn img { width: 100%; height: 100%; display: block; }
+    #info-btn.pressed { transform: scale(0.9); filter: brightness(0.85); }
+
+    /* 操作說明視窗：白底半透明，置中顯示，右上角有關閉按鈕 */
+    #info-panel {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 88%; max-width: 380px; box-sizing: border-box;
+      background: rgba(255, 255, 255, 0.94); color: #222;
+      border-radius: 14px; padding: 22px 20px 18px 20px;
+      pointer-events: auto; z-index: 20;
+      font-family: -apple-system, "Noto Sans TC", sans-serif;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    #info-panel h3 { margin: 0 0 14px 0; font-size: 16px; color: #333; }
+    #info-list { font-size: 14px; line-height: 1.9; }
+    #info-list .info-key {
+      display: inline-block; min-width: 150px;
+      font-weight: bold; color: #6a1b9a;
+      text-align: right; padding-right: 10px; box-sizing: border-box;
+    }
+    #info-close-btn {
+      position: absolute; top: 10px; right: 10px;
+      width: 28px; height: 28px; padding: 0;
+      border: none; border-radius: 50%;
+      background: #e0e0e0; color: #333;
+      font-size: 16px; font-weight: bold; line-height: 1;
+    }
+    #info-close-btn.pressed { transform: scale(0.9); filter: brightness(0.9); }
+
     #status-line { white-space: pre-line; }
   </style>
 </head>
@@ -98,6 +135,27 @@
       <div id="light-row" style="display:none;">
         <label for="light-angle-slider">Light Angle: <span id="light-angle-value">0</span>°</label>
         <input type="range" id="light-angle-slider" min="0" max="360" step="5" value="0">
+      </div>
+    </div>
+
+    <!-- 操作說明按鈕/視窗：只在 Preview 模式顯示(AR 模式不需要滑鼠鍵盤操作說明) -->
+    <button id="info-btn" style="display:none;">
+      <img src="./WebAR_icon_info.png" alt="Controls Info" />
+    </button>
+    <div id="info-panel" style="display:none;">
+      <button id="info-close-btn">&times;</button>
+      <h3>Camera Controls</h3>
+      <div id="info-list">
+        <div><span class="info-key">W:</span> Move forward</div>
+        <div><span class="info-key">A:</span> Strafe left</div>
+        <div><span class="info-key">S:</span> Move backward</div>
+        <div><span class="info-key">D:</span> Strafe right</div>
+        <div><span class="info-key">Q:</span> Move down</div>
+        <div><span class="info-key">E:</span> Move up</div>
+        <div><span class="info-key">Left Click:</span> Look around in place</div>
+        <div><span class="info-key">Right Click:</span> Orbit around the model</div>
+        <div><span class="info-key">Shift + Right Click:</span> Pan the view</div>
+        <div><span class="info-key">Shift + WASD/QE:</span> Move faster while flying</div>
       </div>
     </div>
   </div>
@@ -160,6 +218,9 @@
     const lightRow = document.getElementById('light-row');
     const lightAngleSlider = document.getElementById('light-angle-slider');
     const lightAngleValue = document.getElementById('light-angle-value');
+    const infoBtn = document.getElementById('info-btn');
+    const infoPanel = document.getElementById('info-panel');
+    const infoCloseBtn = document.getElementById('info-close-btn');
     lightAngleSlider.addEventListener('input', () => {
       lightAngleDeg = Number(lightAngleSlider.value);
       lightAngleValue.textContent = lightAngleDeg;
@@ -253,6 +314,16 @@
       btn.addEventListener('pointercancel', release);
     }
     document.querySelectorAll('#controls button').forEach(addPressEffect);
+    // info-btn/info-close-btn 不在 #controls 底下(固定在畫面右下角/置中彈窗)，另外手動註冊按壓效果
+    addPressEffect(infoBtn);
+    addPressEffect(infoCloseBtn);
+
+    infoBtn.addEventListener('click', () => {
+      infoPanel.style.display = 'block';
+    });
+    infoCloseBtn.addEventListener('click', () => {
+      infoPanel.style.display = 'none';
+    });
 
     document.getElementById('y-up').addEventListener('click', () => {
       if (!model) return;
@@ -779,6 +850,7 @@
       adjustRow.style.display = 'flex';   // 高度/旋轉按鈕在預覽模式一樣可以用，方便檢查模型各角度
       floorRow.style.display = 'flex';
       lightRow.style.display = 'flex';    // 光線角度滑桿在預覽模式也能用，方便檢查光照效果
+      infoBtn.style.display = 'block';    // 操作說明按鈕只在 Preview 模式顯示，AR 模式不需要滑鼠鍵盤操作說明
       // GPS 校準/放置按鈕在預覽模式沒有意義(沒有真實定位)，維持隱藏
       adjustRow2.style.display = 'none';
 
