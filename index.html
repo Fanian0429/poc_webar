@@ -106,6 +106,11 @@
     }
     #info-close-btn.pressed { transform: scale(0.9); filter: brightness(0.9); }
 
+    #info-content-ar p { margin: 0 0 10px 0; font-size: 14px; line-height: 1.6; }
+    #info-content-ar ol { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.7; }
+    #info-content-ar li { margin-bottom: 6px; }
+    #info-content-ar strong { color: #6a1b9a; }
+
     #status-line { white-space: pre-line; }
   </style>
 </head>
@@ -138,24 +143,39 @@
       </div>
     </div>
 
-    <!-- 操作說明按鈕/視窗：只在 Preview 模式顯示(AR 模式不需要滑鼠鍵盤操作說明) -->
+    <!-- 操作說明按鈕：Preview 模式顯示相機操作說明，AR 模式顯示模型狀態/疑難排解說明(內容不同) -->
     <button id="info-btn" style="display:none;">
-      <img src="./WebAR_icon_info.png" alt="Controls Info" />
+      <img src="./WebAR_icon_info.png" alt="Info" />
     </button>
     <div id="info-panel" style="display:none;">
       <button id="info-close-btn">&times;</button>
-      <h3>Camera Controls</h3>
-      <div id="info-list">
-        <div><span class="info-key">W:</span> Move forward</div>
-        <div><span class="info-key">A:</span> Strafe left</div>
-        <div><span class="info-key">S:</span> Move backward</div>
-        <div><span class="info-key">D:</span> Strafe right</div>
-        <div><span class="info-key">Q:</span> Move down</div>
-        <div><span class="info-key">E:</span> Move up</div>
-        <div><span class="info-key">Left Click:</span> Look around in place</div>
-        <div><span class="info-key">Right Click:</span> Orbit around the model</div>
-        <div><span class="info-key">Shift + Right Click:</span> Pan the view</div>
-        <div><span class="info-key">Shift + WASD/QE:</span> Move faster while flying</div>
+
+      <div id="info-content-preview">
+        <h3>Camera Controls</h3>
+        <div id="info-list">
+          <div><span class="info-key">W:</span> Move forward</div>
+          <div><span class="info-key">A:</span> Strafe left</div>
+          <div><span class="info-key">S:</span> Move backward</div>
+          <div><span class="info-key">D:</span> Strafe right</div>
+          <div><span class="info-key">Q:</span> Move down</div>
+          <div><span class="info-key">E:</span> Move up</div>
+          <div><span class="info-key">Left Click:</span> Look around in place</div>
+          <div><span class="info-key">Right Click:</span> Orbit around the model</div>
+          <div><span class="info-key">Shift + Right Click:</span> Pan the view</div>
+          <div><span class="info-key">Shift + WASD/QE:</span> Move faster while flying</div>
+        </div>
+      </div>
+
+      <div id="info-content-ar" style="display:none;">
+        <h3>Model Status &amp; Troubleshooting</h3>
+        <p>The last line of the status text at the top of the screen shows the current model status and guidance.</p>
+        <p>If you can't see the model correctly, try the following:</p>
+        <ol>
+          <li>The model file is fairly large, so please allow some time for it to finish loading.</li>
+          <li>If the text in the upper-left shows <strong>"Point your phone at..."</strong>, follow that instruction.</li>
+          <li>Tap <strong>"Place Here"</strong> to place the model directly in front of you.</li>
+          <li>If none of the above works, reload the page or check your network connection.</li>
+        </ol>
       </div>
     </div>
   </div>
@@ -221,6 +241,8 @@
     const infoBtn = document.getElementById('info-btn');
     const infoPanel = document.getElementById('info-panel');
     const infoCloseBtn = document.getElementById('info-close-btn');
+    const infoContentPreview = document.getElementById('info-content-preview');
+    const infoContentAr = document.getElementById('info-content-ar');
     lightAngleSlider.addEventListener('input', () => {
       lightAngleDeg = Number(lightAngleSlider.value);
       lightAngleValue.textContent = lightAngleDeg;
@@ -325,6 +347,14 @@
       infoPanel.style.display = 'none';
     });
 
+    // 依目前模式(AR/Preview)切換操作說明按鈕要顯示的內容，兩種模式的操作方式完全不同，
+    // 所以說明文字也不一樣：Preview 是滑鼠鍵盤相機操作說明，AR 是模型狀態/疑難排解說明
+    function showInfoButtonFor(mode) {
+      infoBtn.style.display = 'block';
+      infoContentPreview.style.display = (mode === 'preview') ? 'block' : 'none';
+      infoContentAr.style.display = (mode === 'ar') ? 'block' : 'none';
+    }
+
     document.getElementById('y-up').addEventListener('click', () => {
       if (!model) return;
       model.position.y += 0.1;
@@ -363,17 +393,7 @@
       }
     });
     document.getElementById('place-here-btn').addEventListener('click', () => {
-      if (!lastHitPosition || !lastCameraPosition) { updateStatus('No plane detected yet. Cannot place model.'); return; }
-      if (!model) { updateStatus('Model is not loaded yet.'); return; }
-
-      model.position.set(lastHitPosition.x, lastHitPosition.y, lastHitPosition.z);
-      model.rotation.y = Math.atan2(
-        lastCameraPosition.x - lastHitPosition.x,
-        lastCameraPosition.z - lastHitPosition.z
-      );
-      model.visible = true;
-      modelPlaced = true;
-      updateStatus('GPS ignored. Model placed at the currently detected surface.');
+      placeModelAtHitPosition('Model placed at the currently detected surface.');
     });
 
     // ---------------------------------------------------------------
@@ -698,6 +718,7 @@
         floorRow.style.display = 'flex';
         adjustRow2.style.display = 'flex';
         lightRow.style.display = 'flex';
+        showInfoButtonFor('ar'); // AR 模式也顯示說明按鈕，內容改成模型狀態/疑難排解說明
 
         renderer.setAnimationLoop(onXRFrame);
       } catch (e) {
@@ -722,6 +743,8 @@
       floorRow.style.display = 'none';
       adjustRow2.style.display = 'none';
       lightRow.style.display = 'none';
+      infoBtn.style.display = 'none';
+      infoPanel.style.display = 'none';
       renderer.setAnimationLoop(null);
     }
 
@@ -850,7 +873,7 @@
       adjustRow.style.display = 'flex';   // 高度/旋轉按鈕在預覽模式一樣可以用，方便檢查模型各角度
       floorRow.style.display = 'flex';
       lightRow.style.display = 'flex';    // 光線角度滑桿在預覽模式也能用，方便檢查光照效果
-      infoBtn.style.display = 'block';    // 操作說明按鈕只在 Preview 模式顯示，AR 模式不需要滑鼠鍵盤操作說明
+      showInfoButtonFor('preview'); // 操作說明按鈕在 Preview/AR 都會顯示，但內容不同；這裡切換成相機操作說明
       // GPS 校準/放置按鈕在預覽模式沒有意義(沒有真實定位)，維持隱藏
       adjustRow2.style.display = 'none';
 
@@ -923,7 +946,7 @@
 
           if (!modelPlaced) {
             planeEverDetected = true;
-            placeModelFromCache('Plane detected successfully. Model anchored — stability now relies entirely on device SLAM tracking.');
+            placeModelAtHitPosition('Plane detected successfully. Model placed in front of you — tap "Calibrate by GPS" to reposition using GPS coordinates instead.');
           }
         } else if (!modelPlaced) {
           updateStatus('Point your phone at the floor/table to scan for a surface...');
@@ -935,7 +958,27 @@
     }
 
     // ---------------------------------------------------------------
-    // 核心邏輯：依 GPS 距離/方位角 + 羅盤朝向，計算模型在 XR 世界座標中的位置
+    // 預設放置邏輯：直接使用 hit-test 偵測到的平面位置，把模型放在使用者正前方，
+    // 不經過任何 GPS 計算。現在這是 AR 模式下的預設放置方式(偵測到平面就自動呼叫這個)，
+    // 「Place Here」按鈕也是呼叫同一個函式，讓使用者隨時可以手動重新放到目前偵測到的平面上。
+    // ---------------------------------------------------------------
+    function placeModelAtHitPosition(successMessage) {
+      if (!model) { updateStatus('Model is still loading...'); return; }
+      if (!lastHitPosition || !lastCameraPosition) { updateStatus('No plane detected yet. Cannot place model.'); return; }
+
+      model.position.set(lastHitPosition.x, lastHitPosition.y, lastHitPosition.z);
+      model.rotation.y = Math.atan2(
+        lastCameraPosition.x - lastHitPosition.x,
+        lastCameraPosition.z - lastHitPosition.z
+      );
+      model.visible = true;
+      modelPlaced = true;
+      updateStatus(successMessage || 'Model placed at the detected surface.');
+    }
+
+    // ---------------------------------------------------------------
+    // GPS 校準邏輯：依 GPS 距離/方位角 + 羅盤朝向，計算模型在 XR 世界座標中的位置。
+    // 只有使用者主動點擊「Calibrate by GPS」時才會呼叫這個函式，不再是預設的自動放置方式。
     // 只使用快取的數值/向量，不依賴任何 XRFrame 物件，按鈕可安全重複呼叫
     // ---------------------------------------------------------------
     function placeModelFromCache(successMessage) {
@@ -959,7 +1002,7 @@
 
       model.visible = true;
       modelPlaced = true;
-      updateStatus(successMessage || 'Model anchored — stability now relies entirely on device SLAM tracking.');
+      updateStatus(successMessage || 'Model repositioned using GPS coordinates — stability now relies entirely on device SLAM tracking.');
     }
   </script>
 </body>
