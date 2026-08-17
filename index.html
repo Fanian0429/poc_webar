@@ -69,7 +69,8 @@
       transform: scale(0.96);
     }
 
-    /* 操作說明按鈕：只在 Preview 模式顯示，固定在畫面右上角，尺寸跟其他控制按鈕的高度相近 */
+    /* 操作說明按鈕：固定在畫面右上角，尺寸跟其他控制按鈕的高度相近；
+       AR/Preview 兩種模式都會顯示，內容由 showInfoButtonFor() 切換 */
     #info-btn {
       position: fixed; right: 16px; top: 64px;
       width: 44px; height: 44px; padding: 0;
@@ -336,7 +337,7 @@
       btn.addEventListener('pointercancel', release);
     }
     document.querySelectorAll('#controls button').forEach(addPressEffect);
-    // info-btn/info-close-btn 不在 #controls 底下(固定在畫面右下角/置中彈窗)，另外手動註冊按壓效果
+    // info-btn/info-close-btn 不在 #controls 底下，另外手動註冊按壓效果
     addPressEffect(infoBtn);
     addPressEffect(infoCloseBtn);
 
@@ -398,7 +399,7 @@
 
     // ---------------------------------------------------------------
     // Three.js 基本場景與燈光
-    // 需求：不再追蹤太陽方向，改用固定的均勻光照，盡量降低模型的明暗反差
+    // 設計目標：整體用均勻光照，盡量降低模型的明暗反差
     // ---------------------------------------------------------------
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(window.devicePixelRatio);
@@ -470,27 +471,27 @@
 
     // ---------------------------------------------------------------
     // 依模型實際包圍球(bounding sphere)大小，動態計算光源距離與陰影攝影機視錐範圍。
-    // 修正原因：原本用固定數字(距離5、視錐±10)是用小型模型的假設寫死的，
-    // 如果實際模型(例如三層樓建物)比這個範圍大，陰影攝影機會框不住整棟建物，
-    // 導致部分結構(如上層樓板)沒有被算進陰影運算，造成光線不合理地穿透、
-    // 或轉到某些角度時牆面/窗框失去遮擋效果。這裡改成量測模型實際大小後自動抓一個足夠寬鬆的範圍。
+    // 原因：固定數字(距離5、視錐±10)只適用小型模型，如果實際模型(例如三層樓建物)比這個範圍大，
+    // 陰影攝影機會框不住整棟建物，導致部分結構(如上層樓板)沒有被算進陰影運算，
+    // 造成光線不合理地穿透、或轉到某些角度時牆面/窗框失去遮擋效果。
+    // 這裡改成量測模型實際大小後自動抓一個足夠寬鬆的範圍。
     //
     // 視錐範圍(frustumSize)的倍率也直接影響陰影銳利度：同樣 SHADOW_MAP_SIZE 的解析度，
     // 攤在越大的範圍上，每一顆陰影貼圖像素對應到的實際公尺數就越粗、邊緣就越鋸齒。
-    // 這裡把倍率收緊到 1.15(比原本寬鬆的 1.6 更銳利，但比上一輪的 1.05 多留一點安全邊際，
-    // 避免浮點誤差或模型邊緣頂點剛好卡在邊界上被裁到)。
+    // 目前倍率 1.15 是在「銳利度」與「安全邊際」之間取得的平衡，
+    // 避免浮點誤差或模型邊緣頂點剛好卡在邊界上被裁到。
     //
     // 真正修掉「範圍是否對準模型」這個問題的關鍵，是下面的 modelCenterLocalOffset：
     // 不能直接把陰影攝影機瞄準 model.position(模型的 pivot 原點)，因為 Rhino/CAD 匯出的模型，
-    // pivot 常常不在幾何中心(可能在角落或底部基準點)。上一輪把範圍收得太緊時，
-    // 這個「瞄準點跟真實中心對不齊」的誤差就會讓建物邊緣落到視錐外，导致遮擋失效。
+    // pivot 常常不在幾何中心(可能在角落或底部基準點)，範圍收得越緊，
+    // 這個「瞄準點跟真實中心對不齊」的誤差就越容易讓建物邊緣落到視錐外，導致遮擋失效。
     // 修法：記錄真正幾何中心相對於 pivot 的本地座標偏移，之後不管模型怎麼平移/旋轉，
     // 都用這個偏移換算出目前的真實世界座標中心，而不是永遠瞄準 pivot。
     // ---------------------------------------------------------------
     const modelCenterLocalOffset = new THREE.Vector3(0, 0, 0);
     // 地面陰影承接面要對齊模型「底部」(bounding box 最低點，理論上就是一樓地板)，
     // 這跟光源瞄準用的「幾何中心」是不同的參考點，不能共用同一個變數，
-    // 否則地面會被抬到建物半高處，陰影就會浮在半空中(圖3的錯誤)。
+    // 否則地面會被抬到建物半高處，陰影就會浮在半空中。
     const modelBaseLocalPoint = new THREE.Vector3(0, 0, 0);
 
     // 純計算：量測模型包圍球，回傳陰影/光源要用的相關參數，並直接套用到 mainLight/shadow camera 上
@@ -536,8 +537,9 @@
       return modelBaseLocalPoint.clone().applyMatrix4(model.matrixWorld);
     }
 
-    // 只在 Preview 模式顯示的地面(ShadowMaterial 只會渲染陰影本身，其餘部分完全透明，
-    // 不會在 AR 模式下多一塊奇怪的灰色地板)
+    // 陰影承接用的地面(ShadowMaterial 只會渲染陰影本身，其餘部分完全透明)。
+    // 顯示與否由 applyLightingProfile() 依 profile.shadows 控制——目前 ar/preview 兩組 profile
+    // 的 shadows 都是 true，所以這塊地面在 AR 模式也會啟用，讓模型陰影能疊加在真實地板上。
     const previewGround = new THREE.Mesh(
       new THREE.PlaneGeometry(50, 50),
       new THREE.ShadowMaterial({ opacity: 0.35 })
@@ -653,8 +655,10 @@
         fitShadowToModel(model);
         if (previewModeActive) {
           model.visible = true; // 預覽模式沒有 GPS/hit-test 流程，模型載入完就直接顯示
+          updateStatus('Model loaded. Entering desktop preview mode (drag to orbit, scroll to zoom, WASD+QE to fly, hold Shift to move faster).');
+        } else {
+          updateStatus('Model loaded. Waiting for AR plane detection.');
         }
-        updateStatus('Model loaded. Waiting for AR plane detection.');
       },
       undefined,
       (err) => {
@@ -674,20 +678,34 @@
     // ---------------------------------------------------------------
     startBtn.addEventListener('click', onStart);
 
+    // 裝置/瀏覽器不支援 AR、要 fallback 到 Preview 模式時使用。
+    // 這裡特地分成兩種訊息，是因為「Model is still loading...」跟「immersive-ar not supported」
+    // 是兩件各自獨立發生的事情：模型從頁面載入當下就開始背景載入，跟使用者何時按下 Start
+    // 按鈕、AR 支援與否是分開的兩條時間線。這個函式呼叫的當下，如果模型剛好已經載入完成，
+    // 代表「還在載入」這件事已經不成立了，直接顯示「可以開始操作」的訊息即可，
+    // 不需要再多解釋一次「為什麼會切到 Preview 模式」；如果還沒載入完，才需要同時
+    // 說明「還在載入」跟「為什麼會切到 Preview 模式」這兩件事，避免使用者誤以為畫面卡住。
+    function switchToPreviewModeWithStatus(reasonText) {
+      if (model) {
+        updateStatus('Model loaded. Entering desktop preview mode (drag to orbit, scroll to zoom, WASD+QE to fly, hold Shift to move faster).');
+      } else {
+        updateStatus('Model is still loading... ' + reasonText + ' Switching to desktop preview mode.');
+      }
+      startPreviewMode();
+    }
+
     async function onStart() {
       startBtn.disabled = true;
       startBtn.textContent = 'Starting...';
 
       if (!navigator.xr) {
-        updateStatus('WebXR not supported by this browser. Switching to desktop preview mode (drag to orbit, scroll to zoom, WASD+QE to fly, hold Shift to move faster).');
-        startPreviewMode();
+        switchToPreviewModeWithStatus('WebXR not supported by this browser.');
         return;
       }
 
       const supported = await navigator.xr.isSessionSupported('immersive-ar');
       if (!supported) {
-        updateStatus('immersive-ar not supported on this device/browser. Switching to desktop preview mode (drag to orbit, scroll to zoom, WASD+QE to fly, hold Shift to move faster).');
-        startPreviewMode();
+        switchToPreviewModeWithStatus('Immersive-ar not supported on this device/browser.');
         return;
       }
 
