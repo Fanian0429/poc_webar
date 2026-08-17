@@ -888,11 +888,12 @@
       previewModeActive = true;
       applyLightingProfile('preview');
       startBtn.style.display = 'none';
-      adjustRow.style.display = 'flex';   // 高度/旋轉按鈕在預覽模式一樣可以用，方便檢查模型各角度
-      floorRow.style.display = 'flex';
       lightRow.style.display = 'flex';    // 光線角度滑桿在預覽模式也能用，方便檢查光照效果
       showInfoButtonFor('preview'); // 操作說明按鈕在 Preview/AR 都會顯示，但內容不同；這裡切換成相機操作說明
-      // GPS 校準/放置按鈕在預覽模式沒有意義(沒有真實定位)，維持隱藏
+      // Height/旋轉/樓層/GPS 校準這些按鈕都是給 AR 現場放置模型用的，預覽模式沒有實際放置流程，
+      // 用滑鼠 WASD+QE 就能自由檢視模型任何角度/樓層，這些按鈕留著沒有意義，維持隱藏
+      adjustRow.style.display = 'none';
+      floorRow.style.display = 'none';
       adjustRow2.style.display = 'none';
 
       scene.background = new THREE.Color(0xdddddd); // 給一個中性背景色方便看清楚模型輪廓與邊緣線
